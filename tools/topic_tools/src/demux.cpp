@@ -57,8 +57,8 @@ static ros::Publisher g_pub_selected; // publishes name of selected publisher to
 
 struct pub_info_t
 {
-  std::string topic_name;
-  ros::Publisher *pub;
+    std::string topic_name;
+    ros::Publisher *pub;
 };
 
 void in_cb(const boost::shared_ptr<ShapeShifter const>& msg);
@@ -69,235 +69,236 @@ static list<struct pub_info_t>::iterator g_selected = g_pubs.end();
 bool sel_srv_cb( topic_tools::DemuxSelect::Request  &req,
                  topic_tools::DemuxSelect::Response &res )
 {
-  bool ret = false;
-  if (g_selected != g_pubs.end()) {
-    res.prev_topic = g_selected->topic_name;
+    bool ret = false;
+    if (g_selected != g_pubs.end()) {
+        res.prev_topic = g_selected->topic_name;
+    }
+    else
+        res.prev_topic = string("");
 
-    // Unregister old topic
-    ROS_INFO("Unregistering %s", res.prev_topic.c_str());
-    if (g_selected->pub)
-	  g_selected->pub->shutdown();
-    delete g_selected->pub;
-    g_selected->pub = NULL;
-  }
-  else
-    res.prev_topic = string("");
-
-  // see if it's the magical '__none' topic, in which case we open the circuit
-  if (req.topic == g_none_topic)
-  {
-    ROS_INFO("demux selected to no output.");
-
-    g_selected = g_pubs.end();
-    ret = true;
-  }
-  else
-  {
-    ROS_INFO("trying to switch demux to %s", req.topic.c_str());
-    // spin through our vector of inputs and find this guy
-    for (list<struct pub_info_t>::iterator it = g_pubs.begin();
-	 it != g_pubs.end();
-	 ++it)
+    // see if it's the magical '__none' topic, in which case we open the circuit
+    if (req.topic == g_none_topic)
     {
-      if (ros::names::resolve(it->topic_name) == ros::names::resolve(req.topic))
-      {
-        g_selected = it;
-        ROS_INFO("demux selected output: [%s]", it->topic_name.c_str());
+        ROS_INFO("demux selected to no output.");
+
+        g_selected = g_pubs.end();
         ret = true;
-      }
     }
-    if(!ret)
+    else
     {
-    	ROS_WARN("Failed to switch to non-existing topic %s in demux.", req.topic.c_str());
+        ROS_INFO("trying to switch demux to %s", req.topic.c_str());
+        // spin through our vector of inputs and find this guy
+        for (list<struct pub_info_t>::iterator it = g_pubs.begin();
+             it != g_pubs.end();
+             ++it)
+        {
+            if (ros::names::resolve(it->topic_name) == ros::names::resolve(req.topic))
+            {
+                g_selected = it;
+                ROS_INFO("demux selected output: [%s]", it->topic_name.c_str());
+                ret = true;
+                break;
+            }
+        }
+        if(!ret)
+        {
+            ROS_WARN("Failed to switch to non-existing topic %s in demux.", req.topic.c_str());
+        }
     }
-  }
 
-  if(ret)
-  {
-    std_msgs::String t;
-    t.data = req.topic;
-    g_pub_selected.publish(t);
-  }
+    if(ret)
+    {
+        std_msgs::String t;
+        t.data = req.topic;
+        g_pub_selected.publish(t);
+    }
 
-  return ret;
+    return ret;
 }
 
 void in_cb(const boost::shared_ptr<ShapeShifter const>& msg)
 {
-  ROS_DEBUG("Received an incoming msg ...");
-  // when a message is incoming, check, if the requested publisher is already existing.
-  // if not, create it with the information available from the incoming message.
-  if(!g_selected->pub)
-  {
-	  try
-	  {
-		  g_selected->pub = new ros::Publisher(msg->advertise(*g_node, g_selected->topic_name, 10, false));
-	  }
-	  catch(ros::InvalidNameException& e)
-	  {
-		ROS_WARN("failed to add topic %s to demux, because it's an invalid name: %s",
-				g_selected->topic_name.c_str(), e.what());
-		return;
-	  }
+    ROS_DEBUG("Received an incoming msg ...");
+    // when a message is incoming, check, if the requested publisher is already existing.
+    // if not, create it with the information available from the incoming message.
+    bool selected_added = false;
+    for (list<struct pub_info_t>::iterator it = g_pubs.begin();
+         it != g_pubs.end(); ++it) {
+        if (!it->pub) {
+            if (it->topic_name == g_selected->topic_name)
+                selected_added = true;
 
-	  ROS_INFO("Added publisher %s to demux! Sleeping for 0.5 secs.", g_selected->topic_name.c_str());
-	  // This is needed, because it takes some time before publisher is registered and can send out messages.
-	  ros::Duration(0.5).sleep();
-  }
+            try {
+                it->pub = new ros::Publisher(msg->advertise(*g_node, it->topic_name, 10, false));
+            }
+            catch (ros::InvalidNameException& e) {
+                ROS_WARN("failed to add topic %s to demux, because it's an invalid name: %s",
+                         it->topic_name.c_str(), e.what());
+                return;
+            }
 
-  // finally: send out the message over the active publisher
-  g_selected->pub->publish(msg);
-  ROS_DEBUG("... and sent it out again!");
+            ROS_INFO("Added publisher %s to demux!", it->topic_name.c_str());
+        }
+    }
+
+    if (selected_added) {
+        // This is needed, because it takes some time before publisher is registered and can send out messages.
+        ROS_INFO("Sleeping 0.5 sec.");
+        ros::Duration(0.5).sleep();
+    }
+
+    // finally: send out the message over the active publisher
+    g_selected->pub->publish(msg);
+    ROS_DEBUG("... and sent it out again!");
 }
 
 bool list_topic_cb(topic_tools::DemuxList::Request& req,
-	 	   topic_tools::DemuxList::Response& res)
+                   topic_tools::DemuxList::Response& res)
 {
-  (void)req;
-  for (list<struct pub_info_t>::iterator it = g_pubs.begin();
-       it != g_pubs.end();
-       ++it)
-  {
-    res.topics.push_back(it->topic_name);
-  }
+    (void)req;
+    for (list<struct pub_info_t>::iterator it = g_pubs.begin();
+         it != g_pubs.end();
+         ++it)
+    {
+        res.topics.push_back(it->topic_name);
+    }
 
-  return true;
+    return true;
 }
 
 bool add_topic_cb(topic_tools::DemuxAdd::Request& req,
-		  topic_tools::DemuxAdd::Response& res)
+                  topic_tools::DemuxAdd::Response& res)
 {
-  (void)res;
-  // Check that it's not already in our list
-  ROS_INFO("trying to add %s to demux", req.topic.c_str());
+    (void)res;
+    // Check that it's not already in our list
+    ROS_INFO("trying to add %s to demux", req.topic.c_str());
 
-  // Can't add the __none topic
-  if(req.topic == g_none_topic)
-  {
-    ROS_WARN("failed to add topic %s to demux, because it's reserved for special use",
-	     req.topic.c_str());
-    return false;
-  }
-
-  // spin through our vector of inputs and find this guy
-  for (list<struct pub_info_t>::iterator it = g_pubs.begin();
-       it != g_pubs.end();
-       ++it)
-  {
-    if (ros::names::resolve(it->topic_name) == ros::names::resolve(req.topic))
+    // Can't add the __none topic
+    if(req.topic == g_none_topic)
     {
-      ROS_WARN("tried to add a topic that demux was already publishing: [%s]",
-	       it->topic_name.c_str());
-      return false;
+        ROS_WARN("failed to add topic %s to demux, because it's reserved for special use",
+                 req.topic.c_str());
+        return false;
     }
-  }
 
-  struct pub_info_t pub_info;
-  pub_info.topic_name = ros::names::resolve(req.topic);
-  pub_info.pub = NULL;
-  g_pubs.push_back(pub_info);
+    // spin through our vector of inputs and find this guy
+    for (list<struct pub_info_t>::iterator it = g_pubs.begin();
+         it != g_pubs.end();
+         ++it)
+    {
+        if (ros::names::resolve(it->topic_name) == ros::names::resolve(req.topic))
+        {
+            ROS_WARN("tried to add a topic that demux was already publishing: [%s]",
+                     it->topic_name.c_str());
+            return false;
+        }
+    }
 
-  ROS_INFO("PRE added %s to demux", req.topic.c_str());
+    struct pub_info_t pub_info;
+    pub_info.topic_name = ros::names::resolve(req.topic);
+    pub_info.pub = NULL;
+    g_pubs.push_back(pub_info);
 
-  return true;
+    ROS_INFO("PRE added %s to demux", req.topic.c_str());
+
+    return true;
 }
 
 bool del_topic_cb(topic_tools::DemuxDelete::Request& req,
-		  topic_tools::DemuxDelete::Response& res)
+                  topic_tools::DemuxDelete::Response& res)
 {
-  (void)res;
-  // Check that it's in our list
-  ROS_INFO("trying to delete %s from demux", req.topic.c_str());
-  // spin through our vector of inputs and find this guy
-  for (list<struct pub_info_t>::iterator it = g_pubs.begin();
-       it != g_pubs.end();
-       ++it)
-  {
-    if (ros::names::resolve(it->topic_name) == ros::names::resolve(req.topic))
+    (void)res;
+    // Check that it's in our list
+    ROS_INFO("trying to delete %s from demux", req.topic.c_str());
+    // spin through our vector of inputs and find this guy
+    for (list<struct pub_info_t>::iterator it = g_pubs.begin();
+         it != g_pubs.end();
+         ++it)
     {
-      // Can't delete the currently selected input, #2863
-      if(it == g_selected)
-      {
-        ROS_WARN("tried to delete currently selected topic %s from demux", req.topic.c_str());
-        return false;
-      }
-      if (it->pub)
-        it->pub->shutdown();
-      delete it->pub;
-      g_pubs.erase(it);
-      ROS_INFO("deleted topic %s from demux", req.topic.c_str());
-      return true;
+        if (ros::names::resolve(it->topic_name) == ros::names::resolve(req.topic))
+        {
+            // Can't delete the currently selected input, #2863
+            if(it == g_selected)
+            {
+                ROS_WARN("tried to delete currently selected topic %s from demux", req.topic.c_str());
+                return false;
+            }
+            if (it->pub)
+                it->pub->shutdown();
+            delete it->pub;
+            g_pubs.erase(it);
+            ROS_INFO("deleted topic %s from demux", req.topic.c_str());
+            return true;
+        }
     }
-  }
 
-  ROS_WARN("tried to delete non-published topic %s from demux", req.topic.c_str());
-  return false;
+    ROS_WARN("tried to delete non-published topic %s from demux", req.topic.c_str());
+    return false;
 }
 
 int main(int argc, char **argv)
 {
-  vector<string> args;
-  ros::removeROSArgs(argc, (const char**)argv, args);
+    vector<string> args;
+    ros::removeROSArgs(argc, (const char**)argv, args);
 
-  if (args.size() < 3)
-  {
-    printf("\nusage: demux IN_TOPIC OUT_TOPIC1 [OUT_TOPIC2 [...]]\n\n");
-    return 1;
-  }
-  std::string topic_name;
-  if(!getBaseName(args[1], topic_name))
-    return 1;
-  ros::init(argc, argv, topic_name + string("_demux"),
-            ros::init_options::AnonymousName);
-  vector<string> topics;
-  for (unsigned int i = 2; i < args.size(); i++)
-    topics.push_back(args[i]);
-  ros::NodeHandle n;
-  g_node = &n;
-  g_input_topic = args[1];
-  // Put our API into the "demux" namespace, which the user should usually remap
-  ros::NodeHandle demux_nh("demux"), pnh("~");
+    if (args.size() < 3)
+    {
+        printf("\nusage: demux IN_TOPIC OUT_TOPIC1 [OUT_TOPIC2 [...]]\n\n");
+        return 1;
+    }
+    std::string topic_name;
+    if(!getBaseName(args[1], topic_name))
+        return 1;
+    ros::init(argc, argv, topic_name + string("_demux"),
+              ros::init_options::AnonymousName);
+    vector<string> topics;
+    for (unsigned int i = 2; i < args.size(); i++)
+        topics.push_back(args[i]);
+    ros::NodeHandle n;
+    g_node = &n;
+    g_input_topic = args[1];
+    // Put our API into the "demux" namespace, which the user should usually remap
+    ros::NodeHandle demux_nh("demux"), pnh("~");
 
-  // Latched publisher for selected output topic name
-  g_pub_selected = demux_nh.advertise<std_msgs::String>(string("selected"), 1, true);
+    // Latched publisher for selected output topic name
+    g_pub_selected = demux_nh.advertise<std_msgs::String>(string("selected"), 1, true);
 
-  for (size_t i = 0; i < topics.size(); i++)
-  {
-    struct pub_info_t pub_info;
-    pub_info.topic_name = ros::names::resolve(topics[i]);
-    pub_info.pub = NULL;
-    g_pubs.push_back(pub_info);
-    ROS_INFO("PRE added %s to demux", topics[i].c_str());
-  }
-  g_selected = g_pubs.begin(); // select first topic to start
-  std_msgs::String t;
-  t.data = g_selected->topic_name;
-  g_pub_selected.publish(t);
+    for (size_t i = 0; i < topics.size(); i++)
+    {
+        struct pub_info_t pub_info;
+        pub_info.topic_name = ros::names::resolve(topics[i]);
+        pub_info.pub = NULL;
+        g_pubs.push_back(pub_info);
+        ROS_INFO("PRE added %s to demux", topics[i].c_str());
+    }
+    g_selected = g_pubs.begin(); // select first topic to start
+    std_msgs::String t;
+    t.data = g_selected->topic_name;
+    g_pub_selected.publish(t);
 
-  // Create the one subscriber
-  g_sub = ros::Subscriber(n.subscribe<ShapeShifter>(g_input_topic, 10, boost::bind(in_cb, _1)));
+    // Create the one subscriber
+    g_sub = ros::Subscriber(n.subscribe<ShapeShifter>(g_input_topic, 10, boost::bind(in_cb, _1)));
 
 
-  // New service
-  ros::ServiceServer ss_select = demux_nh.advertiseService(string("select"), sel_srv_cb);
-  ros::ServiceServer ss_add = demux_nh.advertiseService(string("add"), add_topic_cb);
-  ros::ServiceServer ss_list = demux_nh.advertiseService(string("list"), list_topic_cb);
-  ros::ServiceServer ss_del = demux_nh.advertiseService(string("delete"), del_topic_cb);
+    // New service
+    ros::ServiceServer ss_select = demux_nh.advertiseService(string("select"), sel_srv_cb);
+    ros::ServiceServer ss_add = demux_nh.advertiseService(string("add"), add_topic_cb);
+    ros::ServiceServer ss_list = demux_nh.advertiseService(string("list"), list_topic_cb);
+    ros::ServiceServer ss_del = demux_nh.advertiseService(string("delete"), del_topic_cb);
 
-  // Run
-  ros::spin();
+    // Run
+    ros::spin();
 
-  // Destruction
-  for (list<struct pub_info_t>::iterator it = g_pubs.begin();
-       it != g_pubs.end();
-       ++it)
-  {
-    if (it->pub)
-      it->pub->shutdown();
-    delete it->pub;
-  }
+    // Destruction
+    for (list<struct pub_info_t>::iterator it = g_pubs.begin();
+         it != g_pubs.end();
+         ++it)
+    {
+        if (it->pub)
+            it->pub->shutdown();
+        delete it->pub;
+    }
 
-  g_pubs.clear();
-  return 0;
+    g_pubs.clear();
+    return 0;
 }
-
